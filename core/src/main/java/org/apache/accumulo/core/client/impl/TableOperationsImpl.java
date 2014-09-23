@@ -185,6 +185,7 @@ public class TableOperationsImpl extends TableOperationsHelper {
    *           if the table already exists
    */
   @Override
+  @Deprecated
   public void create(String tableName) throws AccumuloException, AccumuloSecurityException, TableExistsException {
     create(tableName, true, TimeType.MILLIS);
   }
@@ -196,6 +197,7 @@ public class TableOperationsImpl extends TableOperationsHelper {
    *          Enables/disables the versioning iterator, which will limit the number of Key versions kept.
    */
   @Override
+  @Deprecated
   public void create(String tableName, boolean limitVersion) throws AccumuloException, AccumuloSecurityException, TableExistsException {
     create(tableName, limitVersion, TimeType.MILLIS);
   }
@@ -209,17 +211,49 @@ public class TableOperationsImpl extends TableOperationsHelper {
    *          Enables/disables the versioning iterator, which will limit the number of Key versions kept.
    */
   @Override
+  @Deprecated
   public void create(String tableName, boolean limitVersion, TimeType timeType) throws AccumuloException, AccumuloSecurityException, TableExistsException {
     checkArgument(tableName != null, "tableName is null");
     checkArgument(timeType != null, "timeType is null");
 
-    List<ByteBuffer> args = Arrays.asList(ByteBuffer.wrap(tableName.getBytes(StandardCharsets.UTF_8)), ByteBuffer.wrap(timeType.name().getBytes(StandardCharsets.UTF_8)));
+    List<ByteBuffer> args = Arrays.asList(ByteBuffer.wrap(tableName.getBytes(StandardCharsets.UTF_8)),
+        ByteBuffer.wrap(timeType.name().getBytes(StandardCharsets.UTF_8)));
 
     Map<String,String> opts;
     if (limitVersion)
       opts = IteratorUtil.generateInitialTableProperties(limitVersion);
     else
       opts = Collections.emptyMap();
+
+    try {
+      doTableFateOperation(tableName, AccumuloException.class, FateOperation.TABLE_CREATE, args, opts);
+    } catch (TableNotFoundException e) {
+      // should not happen
+      throw new AssertionError(e);
+    }
+  }
+
+  /**
+   * @param tableName
+   *          the name of the table
+   * @param ntc
+   *          specifies the new table's configuration.  It determines whether the versioning iterator is enabled or disabled, logical or real-time based time recording for entries in the table
+   * 
+   */
+  @Override
+  public void create(String tableName, NewTableConfiguration ntc) throws AccumuloException, AccumuloSecurityException, TableExistsException {
+    checkArgument(tableName != null, "tableName is null");
+    checkArgument(ntc != null, "ntc is null");
+
+    List<ByteBuffer> args = Arrays.asList(ByteBuffer.wrap(tableName.getBytes(StandardCharsets.UTF_8)),
+        ByteBuffer.wrap(ntc.getTimeType().name().getBytes(StandardCharsets.UTF_8)));
+
+    Map<String,String> opts;
+    if (ntc.getLimitVersion()) {
+      opts = IteratorUtil.generateInitialTableProperties(ntc.getLimitVersion());
+      opts.putAll(ntc.getProperties());
+    } else
+      opts = ntc.getProperties();
 
     try {
       doTableFateOperation(tableName, AccumuloException.class, FateOperation.TABLE_CREATE, args, opts);

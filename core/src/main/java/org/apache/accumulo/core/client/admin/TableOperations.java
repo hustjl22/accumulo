@@ -30,6 +30,7 @@ import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.IteratorSetting;
 import org.apache.accumulo.core.client.TableExistsException;
 import org.apache.accumulo.core.client.TableNotFoundException;
+import org.apache.accumulo.core.client.impl.NewTableConfiguration;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.iterators.IteratorUtil.IteratorScope;
 import org.apache.accumulo.core.security.Authorizations;
@@ -70,6 +71,7 @@ public interface TableOperations {
    * @throws TableExistsException
    *           if the table already exists
    */
+  @Deprecated
   void create(String tableName) throws AccumuloException, AccumuloSecurityException, TableExistsException;
 
   /**
@@ -84,6 +86,7 @@ public interface TableOperations {
    * @throws TableExistsException
    *           if the table already exists
    */
+  @Deprecated
   void create(String tableName, boolean limitVersion) throws AccumuloException, AccumuloSecurityException, TableExistsException;
 
   /**
@@ -100,7 +103,22 @@ public interface TableOperations {
    * @throws TableExistsException
    *           if the table already exists
    */
+  @Deprecated
   void create(String tableName, boolean versioningIter, TimeType timeType) throws AccumuloException, AccumuloSecurityException, TableExistsException;
+
+  /**
+   * @param tableName
+   *          the name of the table
+   * @param ntc
+   *          specifies the new table's configuration.  It determines whether the versioning iterator is enabled or disabled, logical or real-time based time recording for entries in the table
+   * @throws AccumuloException
+   *           if a general error occurs
+   * @throws AccumuloSecurityException
+   *           if the user does not have permission
+   * @throws TableExistsException
+   *           if the table already exists
+   */
+  void create(String tableName, NewTableConfiguration ntc)throws AccumuloSecurityException, AccumuloException, TableExistsException;
 
   /**
    * Imports a table exported via exportTable and copied via hadoop distcp.

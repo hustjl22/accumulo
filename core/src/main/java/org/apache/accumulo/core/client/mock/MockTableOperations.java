@@ -38,6 +38,7 @@ import org.apache.accumulo.core.client.TableExistsException;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.admin.DiskUsage;
 import org.apache.accumulo.core.client.admin.FindMax;
+import org.apache.accumulo.core.client.impl.NewTableConfiguration;
 import org.apache.accumulo.core.client.impl.TableOperationsHelper;
 import org.apache.accumulo.core.client.admin.TimeType;
 import org.apache.accumulo.core.client.impl.Tables;
@@ -87,17 +88,21 @@ class MockTableOperations extends TableOperationsHelper {
   }
 
   @Override
+  @Deprecated
   public void create(String tableName) throws AccumuloException, AccumuloSecurityException, TableExistsException {
     create(tableName, true, TimeType.MILLIS);
   }
 
   @Override
+  @Deprecated
   public void create(String tableName, boolean versioningIter) throws AccumuloException, AccumuloSecurityException, TableExistsException {
     create(tableName, versioningIter, TimeType.MILLIS);
   }
 
   @Override
+  @Deprecated
   public void create(String tableName, boolean versioningIter, TimeType timeType) throws AccumuloException, AccumuloSecurityException, TableExistsException {
+
     String namespace = Tables.qualify(tableName).getFirst();
     if (!tableName.matches(Tables.VALID_NAME_REGEX)) {
       throw new IllegalArgumentException();
@@ -109,6 +114,22 @@ class MockTableOperations extends TableOperationsHelper {
       throw new IllegalArgumentException("Namespace (" + namespace + ") does not exist, create it first");
     }
     acu.createTable(username, tableName, versioningIter, timeType);
+  }
+  
+  @Override
+  public void create(String tableName, NewTableConfiguration ntc) throws AccumuloException,
+      AccumuloSecurityException, TableExistsException {
+    String namespace = Tables.qualify(tableName).getFirst();
+    if (!tableName.matches(Tables.VALID_NAME_REGEX)) {
+      throw new IllegalArgumentException();
+    }
+    if (exists(tableName))
+      throw new TableExistsException(tableName, tableName, "");
+
+    if (!namespaceExists(namespace)) {
+      throw new IllegalArgumentException("Namespace (" + namespace + ") does not exist, create it first");
+    }
+    acu.createTable(username, tableName, ntc.getLimitVersion(), ntc.getTimeType(), ntc.getProperties());
   }
 
   @Override

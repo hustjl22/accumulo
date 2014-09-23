@@ -17,13 +17,25 @@
 package org.apache.accumulo.server.fs;
 
 import java.util.Random;
+import org.apache.log4j.Logger;
 
 public class RandomVolumeChooser implements VolumeChooser {
+  private static final Logger log = Logger.getLogger(RandomVolumeChooser.class);
   Random random = new Random();
-  
+
+  public RandomVolumeChooser() {}
+
   @Override
-  public String choose(String[] options) {
-    return options[random.nextInt(options.length)];
+  public String choose(VolumeChooserEnvironment env, String[] options) {
+    return choose(options);
   }
 
+  @Override
+  public String choose(String[] options) {
+    // If table is not specified choose randomly from the given options
+    log.debug("Choosing without per table properties");
+    int choice = random.nextInt(options.length);
+    log.debug("Choice = " + options[choice]);
+    return options[choice];
+  }
 }

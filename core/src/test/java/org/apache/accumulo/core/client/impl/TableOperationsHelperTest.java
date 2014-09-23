@@ -58,17 +58,23 @@ public class TableOperationsHelperTest {
     }
 
     @Override
+    @Deprecated
     public void create(String tableName) throws AccumuloException, AccumuloSecurityException, TableExistsException {}
 
     @Override
+    @Deprecated
     public void create(String tableName, boolean limitVersion) throws AccumuloException, AccumuloSecurityException, TableExistsException {
       create(tableName, limitVersion, TimeType.MILLIS);
     }
 
     @Override
+    @Deprecated
     public void create(String tableName, boolean versioningIter, TimeType timeType) throws AccumuloException, AccumuloSecurityException, TableExistsException {}
 
     @Override
+    public void create(String tableName, NewTableConfiguration ntc) throws AccumuloException,
+        AccumuloSecurityException, TableExistsException {}
+
     public void addSplits(String tableName, SortedSet<Text> partitionKeys) throws TableNotFoundException, AccumuloException, AccumuloSecurityException {}
 
     @Deprecated
