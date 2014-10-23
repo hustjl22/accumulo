@@ -183,6 +183,7 @@ public class RFile {
       startBlock = in.readInt();
       
       int size = in.readInt();
+      System.out.println("Reading size cf: " + size);
       
       if (size == -1) {
         if (!isDefaultLG)
@@ -197,9 +198,11 @@ public class RFile {
         
         for (int i = 0; i < size; i++) {
           int len = in.readInt();
+          System.out.println("Length: " + len);
           byte cf[] = new byte[len];
           in.readFully(cf);
           long count = in.readLong();
+          System.out.println(cf + ", " + count);
           
           columnFamilies.put(new ArrayByteSequence(cf), new MutableLong(count));
         }
@@ -230,11 +233,14 @@ public class RFile {
         out.writeInt(-1);
       } else {
         out.writeInt(columnFamilies.size());
+        System.out.println("Writing Size cf: " + columnFamilies.size());
         
         for (Entry<ByteSequence,MutableLong> entry : columnFamilies.entrySet()) {
           out.writeInt(entry.getKey().length());
           out.write(entry.getKey().getBackingArray(), entry.getKey().offset(), entry.getKey().length());
           out.writeLong(entry.getValue().longValue());
+          
+          System.out.println("Writing: " + entry.getKey().length() + ", " + entry.getKey().getBackingArray() + ", " + entry.getKey().offset() + ", " + entry.getKey().length() + ", " + entry.getValue().longValue());
         }
       }
       

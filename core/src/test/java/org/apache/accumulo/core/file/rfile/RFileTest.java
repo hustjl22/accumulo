@@ -626,6 +626,7 @@ public class RFileTest {
 
   @Test
   public void test8() throws IOException {
+    System.out.println("Test 8");
     TestRFile trf = new TestRFile(conf);
 
     trf.openWriter();
