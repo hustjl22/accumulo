@@ -16,7 +16,9 @@
  */
 package org.apache.accumulo.server.fs;
 
+import com.google.common.base.Optional;
+
 
 public interface VolumeChooser {
-  String choose(String[] options);
+  String choose(Optional<VolumeChooserEnvironment> env, String[] options);
 }

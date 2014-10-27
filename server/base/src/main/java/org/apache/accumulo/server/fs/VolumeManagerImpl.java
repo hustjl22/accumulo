@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import org.apache.accumulo.core.client.Instance;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
 import org.apache.accumulo.core.conf.Property;
@@ -44,6 +45,9 @@ import org.apache.accumulo.core.util.CachedConfiguration;
 import org.apache.accumulo.core.volume.NonConfiguredVolume;
 import org.apache.accumulo.core.volume.Volume;
 import org.apache.accumulo.core.volume.VolumeConfiguration;
+import org.apache.accumulo.server.client.HdfsZooInstance;
+import org.apache.accumulo.server.conf.ServerConfigurationFactory;
+import org.apache.accumulo.server.conf.TableConfiguration;
 import org.apache.commons.lang.NotImplementedException;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -60,6 +64,7 @@ import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.util.Progressable;
 import org.apache.log4j.Logger;
 
+import com.google.common.base.Optional;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 
@@ -572,8 +577,26 @@ public class VolumeManagerImpl implements VolumeManager {
   }
 
   @Override
-  public String choose(String[] options) {
-    return chooser.choose(options);
+  public String choose(Optional<String> tableId, String[] options) {
+    // If the tableId is present, use that to create a VolumeChooserEnvironment variable
+    if (tableId.isPresent()) {
+      // Get the current instance and from that the ServerConfigurationFactory and in turn the tableId
+      try {
+        Instance instance = HdfsZooInstance.getInstance();
+        ServerConfigurationFactory serverConf = new ServerConfigurationFactory(instance);
+        TableConfiguration tableConf = serverConf.getTableConfiguration(tableId.get());
+
+        // Create the environment and then choose the volume using the currently defined chooser
+        VolumeChooserEnvironment env = new VolumeChooserEnvironment(tableConf);
+        return chooser.choose(Optional.of(env), options);
+      } catch (Exception e) {
+        log.warn("Instance not yet created, defaulting to the RandomVolumeChooser", e);
+        return chooser.choose(Optional.<VolumeChooserEnvironment>absent(),options);
+      }
+    } else {
+      // If the tableId is missing, then just choose using the current chooser, without using the per table properties
+      return chooser.choose(Optional.<VolumeChooserEnvironment>absent(),options);
+    }
   }
 
   @Override

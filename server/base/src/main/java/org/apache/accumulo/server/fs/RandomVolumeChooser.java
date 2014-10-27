@@ -18,12 +18,17 @@ package org.apache.accumulo.server.fs;
 
 import java.util.Random;
 
+import com.google.common.base.Optional;
+
 public class RandomVolumeChooser implements VolumeChooser {
   Random random = new Random();
-  
-  @Override
-  public String choose(String[] options) {
-    return options[random.nextInt(options.length)];
-  }
 
+  public RandomVolumeChooser() {}
+
+  @Override
+  public String choose(Optional<VolumeChooserEnvironment> env, String[] options) {
+    // If table is not specified choose randomly from the given options
+    int choice = random.nextInt(options.length);
+    return options[choice];
+  }
 }

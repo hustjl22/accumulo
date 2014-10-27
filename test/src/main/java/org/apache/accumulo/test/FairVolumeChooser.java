@@ -19,6 +19,9 @@ package org.apache.accumulo.test;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.accumulo.server.fs.VolumeChooser;
+import org.apache.accumulo.server.fs.VolumeChooserEnvironment;
+
+import com.google.common.base.Optional;
 
 /**
  * Try to assign some fairness to choosing Volumes. Intended for tests, not for production
@@ -28,7 +31,7 @@ public class FairVolumeChooser implements VolumeChooser {
   private final ConcurrentHashMap<Integer,Integer> optionLengthToLastChoice = new ConcurrentHashMap<Integer,Integer>();
 
   @Override
-  public String choose(String[] options) {
+  public String choose(Optional<VolumeChooserEnvironment> env, String[] options) {
     int currentChoice;
     Integer lastChoice = optionLengthToLastChoice.get(options.length);
     if (null == lastChoice) {

@@ -464,6 +464,8 @@ public enum Property {
   TABLE_REPLICATION_TARGET("table.replication.target.", null, PropertyType.PREFIX, "Enumerate a mapping of other systems which this table should " +
       "replicate their data to. The key suffix is the identifying cluster name and the value is an identifier for a location on the target system, " +
       "e.g. the ID of the table on the target to replicate to"),
+  TABLE_VOLUME_CHOOSER("table.volume.chooser", "org.apache.accumulo.server.fs.RandomVolumeChooser", PropertyType.CLASSNAME,
+      "The class that will be used to select which volume will be used to create new files for this table."),
 
   // VFS ClassLoader properties
   VFS_CLASSLOADER_SYSTEM_CLASSPATH_PROPERTY(AccumuloVFSClassLoader.VFS_CLASSLOADER_SYSTEM_CLASSPATH_PROPERTY, "", PropertyType.STRING,
