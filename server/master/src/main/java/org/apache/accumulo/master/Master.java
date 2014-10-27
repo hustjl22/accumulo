@@ -253,6 +253,7 @@ public class Master implements LiveTServerSet.Listener, TableObserver, CurrentSt
       Path oldPath = fs.getFullPath(FileType.TABLE, "/" + MetadataTable.ID + "/root_tablet");
       if (fs.exists(oldPath)) {
         String newPath = fs.choose(Optional.of(RootTable.ID), ServerConstants.getBaseUris()) + Constants.HDFS_TABLES_DIR + Path.SEPARATOR + RootTable.ID;
+
         fs.mkdirs(new Path(newPath));
         if (!fs.rename(oldPath, new Path(newPath))) {
           throw new IOException("Failed to move root tablet from " + oldPath + " to " + newPath);
