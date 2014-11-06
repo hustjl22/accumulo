@@ -16,6 +16,9 @@
  */
 package org.apache.accumulo.core.iterators.system;
 
+import java.util.Set;
+
+import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.Filter;
@@ -37,6 +40,7 @@ public class VisibilityFilter extends Filter {
   protected LRUMap cache;
   protected Text tmpVis;
   protected Authorizations authorizations;
+  protected Set<ByteSequence> visibilities;
   
   private static final Logger log = Logger.getLogger(VisibilityFilter.class);
   
@@ -51,11 +55,37 @@ public class VisibilityFilter extends Filter {
     this.tmpVis = new Text();
   }
   
+  
   @Override
   public SortedKeyValueIterator<Key,Value> deepCopy(IteratorEnvironment env) {
     return new VisibilityFilter(getSource().deepCopy(env), authorizations, TextUtil.getBytes(defaultVisibility));
   }
-  
+
+  public boolean accept(Set<ByteSequence> visibilities) {
+    for (ByteSequence vis : visibilities) {
+      byte[] visibility = vis.toArray();
+
+      Boolean b = (Boolean) cache.get(vis);
+      if (b != null && b.booleanValue())
+        return b;
+      else {
+        try {
+          Boolean bb = ve.evaluate(new ColumnVisibility(visibility));
+          cache.put(new Text(visibility), bb);
+          if (bb)
+            return true;
+        } catch (VisibilityParseException e) {
+          log.error("Parse Error", e);
+          return false;
+        } catch (BadArgumentException e) {
+          log.error("Parse Error", e);
+          return false;
+        }
+      }
+    }
+    return false;
+  }
+
   @Override
   public boolean accept(Key k, Value v) {
     Text testVis = k.getColumnVisibility(tmpVis);

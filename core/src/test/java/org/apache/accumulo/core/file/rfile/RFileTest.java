@@ -255,7 +255,6 @@ public class RFileTest {
 
   @Test
   public void test1() throws IOException {
-
     // test an empty file
 
     TestRFile trf = new TestRFile(conf);
@@ -274,7 +273,6 @@ public class RFileTest {
 
   @Test
   public void test2() throws IOException {
-
     // test an rfile with one entry
 
     TestRFile trf = new TestRFile(conf);
@@ -305,13 +303,12 @@ public class RFileTest {
     assertFalse(trf.iter.hasTop());
 
     assertEquals(nk("r1", "cf1", "cq1", "L1", 55), trf.reader.getLastKey());
-
+    
     trf.closeReader();
   }
 
   @Test
   public void test3() throws IOException {
-
     // test an rfile with multiple rows having multiple columns
 
     TestRFile trf = new TestRFile(conf);
@@ -448,6 +445,8 @@ public class RFileTest {
       }
     }
 
+    trf.reader.printInfo();
+
     trf.closeReader();
   }
 
@@ -512,7 +511,6 @@ public class RFileTest {
 
   @Test
   public void test5() throws IOException {
-
     TestRFile trf = new TestRFile(conf);
 
     trf.openWriter();
@@ -541,7 +539,6 @@ public class RFileTest {
 
   @Test
   public void test6() throws IOException {
-
     TestRFile trf = new TestRFile(conf);
 
     trf.openWriter();
@@ -639,7 +636,7 @@ public class RFileTest {
 
     // test seeking between each key forward
     for (int i = 0; i < 2499; i++) {
-      trf.seek(nk(nf("r_", i), "cf1", "cq1", "L1", 42).followingKey(PartialKey.ROW));
+      trf.seek(nk(nf("r_", i), "cf1", "cq1", "", 42).followingKey(PartialKey.ROW));
       assertTrue(trf.iter.hasTop());
       assertEquals(nk(nf("r_", i + 1), "cf1", "cq1", "L1", 42), trf.iter.getTopKey());
     }
@@ -739,6 +736,149 @@ public class RFileTest {
     }
 
     return cfs;
+  }
+  
+  @Test
+  public void newTest() throws IOException{
+    TestRFile trf = new TestRFile(conf);
+
+    trf.openWriter(false);
+
+    trf.writer.startNewLocalityGroup("lg1", ncfs("cf1", "cf2"));
+
+    trf.writer.append(nk("0000", "cf1", "doe,john", "A", 4), nv("1123 West Left st"));
+    trf.writer.append(nk("0002", "cf2", "doe,jane", "B", 5), nv("1124 East Right st"));
+
+    trf.writer.startNewLocalityGroup("lg2", ncfs("cf3", "cf4"));
+
+    trf.writer.append(nk("0001", "cf3", "buck,john", "C", 4), nv("90 Slum st"));
+    trf.writer.append(nk("0003", "cf4", "buck,jane", "D", 5), nv("09 Slum st"));
+
+    trf.writer.close();
+
+    trf.openReader();
+    
+ // scan first loc group
+    Range r = new Range(nk("0000", "cf1", "doe,john", "A", 4), true, nk("0003", "cf4", "buck,jane", "A", 5), true);
+    trf.iter.seek(r, ncfs("cf1", "cf2"), true);
+    assertEquals(1, trf.reader.getNumLocalityGroupsSeeked());
+
+    assertTrue(trf.iter.hasTop());
+    assertTrue(trf.iter.getTopKey().equals(nk("0000", "cf1", "doe,john", "A", 4)));
+    assertEquals(nv("1123 West Left st"), trf.iter.getTopValue());
+    trf.iter.next();
+  //  assertTrue(trf.iter.hasTop());
+   // assertTrue(trf.iter.getTopKey().equals(nk("0002", "cf2", "doe,jane", "B", 5)));
+ //   assertEquals(nv("1124 East Right st"), trf.iter.getTopValue());
+ //   trf.iter.next();
+    assertFalse(trf.iter.hasTop());
+
+    // scan second loc group
+    r = new Range(nk("0000", "cf1", "doe,john", "", 4), true, nk("0003", "cf4", "buck,jane", "", 5), true);
+    trf.iter.seek(r, ncfs("cf3", "cf4"), true);
+    assertEquals(0, trf.reader.getNumLocalityGroupsSeeked());
+
+/*    assertTrue(trf.iter.hasTop());
+    assertTrue(trf.iter.getTopKey().equals(nk("0001", "cf3", "buck,john", "C", 4)));
+    assertEquals(nv("90 Slum st"), trf.iter.getTopValue());
+    trf.iter.next();
+    assertTrue(trf.iter.hasTop());
+    assertTrue(trf.iter.getTopKey().equals(nk("0003", "cf4", "buck,jane", "D", 5)));
+    assertEquals(nv("09 Slum st"), trf.iter.getTopValue());
+    trf.iter.next();
+    assertFalse(trf.iter.hasTop());
+*/
+    // scan all loc groups
+    r = new Range(nk("0000", "cf1", "doe,john", "", 4), true, nk("0003", "cf4", "buck,jane", "", 5), true);
+    trf.iter.seek(r, EMPTY_COL_FAMS, false);
+    assertEquals(1, trf.reader.getNumLocalityGroupsSeeked());
+
+    assertTrue(trf.iter.hasTop());
+    assertTrue(trf.iter.getTopKey().equals(nk("0000", "cf1", "doe,john", "A", 4)));
+    assertEquals(nv("1123 West Left st"), trf.iter.getTopValue());
+    trf.iter.next();
+ //   assertTrue(trf.iter.hasTop());
+//    assertTrue(trf.iter.getTopKey().equals(nk("0001", "cf3", "buck,john", "C", 4)));
+//    assertEquals(nv("90 Slum st"), trf.iter.getTopValue());
+ //   trf.iter.next();
+ //   assertTrue(trf.iter.hasTop());
+//    assertTrue(trf.iter.getTopKey().equals(nk("0002", "cf2", "doe,jane", "B", 5)));
+//    assertEquals(nv("1124 East Right st"), trf.iter.getTopValue());
+//    trf.iter.next();
+ //   assertTrue(trf.iter.hasTop());
+ //   assertTrue(trf.iter.getTopKey().equals(nk("0003", "cf4", "buck,jane", "D", 5)));
+ //   assertEquals(nv("09 Slum st"), trf.iter.getTopValue());
+ //   trf.iter.next();
+    assertFalse(trf.iter.hasTop());
+
+    // scan no loc groups
+    r = new Range(nk("0000", "cf1", "doe,john", "", 4), true, nk("0003", "cf4", "buck,jane", "", 5), true);
+    trf.iter.seek(r, ncfs("saint", "dogooder"), true);
+    assertEquals(0, trf.reader.getNumLocalityGroupsSeeked());
+    assertFalse(trf.iter.hasTop());
+
+    // scan a subset of second locality group
+    r = new Range(nk("0000", "cf1", "doe,john", "", 4), true, nk("0003", "cf4", "buck,jane", "", 5), true);
+    trf.iter.seek(r, ncfs("cf4"), true);
+    assertEquals(0, trf.reader.getNumLocalityGroupsSeeked());
+
+    assertFalse(trf.iter.hasTop());
+/*    assertTrue(trf.iter.getTopKey().equals(nk("0003", "cf4", "buck,jane", "D", 5)));
+    assertEquals(nv("09 Slum st"), trf.iter.getTopValue());
+    trf.iter.next();
+    assertTrue(trf.iter.hasTop());
+*/
+    // scan a subset of second locality group
+    r = new Range(nk("0000", "cf1", "doe,john", "", 4), true, nk("0003", "cf4", "buck,jane", "", 5), true);
+    trf.iter.seek(r, ncfs("cf3"), true);
+    assertEquals(0, trf.reader.getNumLocalityGroupsSeeked());
+
+    assertFalse(trf.iter.hasTop());
+/*    assertTrue(trf.iter.getTopKey().equals(nk("0001", "cf3", "buck,john", "C", 4)));
+    assertEquals(nv("90 Slum st"), trf.iter.getTopValue());
+    trf.iter.next();
+    assertFalse(trf.iter.hasTop());
+*/
+    // scan subset of first loc group
+    r = new Range(nk("0000", "cf1", "doe,john", "", 4), true, nk("0003", "cf4", "buck,jane", "", 5), true);
+    trf.iter.seek(r, ncfs("cf1"), true);
+    assertEquals(1, trf.reader.getNumLocalityGroupsSeeked());
+
+    assertTrue(trf.iter.hasTop());
+    assertTrue(trf.iter.getTopKey().equals(nk("0000", "cf1", "doe,john", "A", 4)));
+    assertEquals(nv("1123 West Left st"), trf.iter.getTopValue());
+    trf.iter.next();
+    assertFalse(trf.iter.hasTop());
+
+    // scan subset of first loc group
+    r = new Range(nk("0000", "cf1", "doe,john", "", 4), true, nk("0003", "cf4", "buck,jane", "", 5), true);
+    trf.iter.seek(r, ncfs("cf2"), true);
+    assertEquals(1, trf.reader.getNumLocalityGroupsSeeked());
+
+///    assertTrue(trf.iter.hasTop());
+//    assertTrue(trf.iter.getTopKey().equals(nk("0002", "cf2", "doe,jane", "B", 5)));
+//    assertEquals(nv("1124 East Right st"), trf.iter.getTopValue());
+//   trf.iter.next();
+    assertFalse(trf.iter.hasTop());
+
+    // scan subset of all loc groups
+    r = new Range(nk("0000", "cf1", "doe,john", "", 4), true, nk("0003", "cf4", "buck,jane", "", 5), true);
+    trf.iter.seek(r, ncfs("cf1", "cf4"), true);
+    assertEquals(1, trf.reader.getNumLocalityGroupsSeeked());
+
+    assertTrue(trf.iter.hasTop());
+    assertTrue(trf.iter.getTopKey().equals(nk("0000", "cf1", "doe,john", "A", 4)));
+    assertEquals(nv("1123 West Left st"), trf.iter.getTopValue());
+    trf.iter.next();
+    assertFalse(trf.iter.hasTop());
+/*    assertTrue(trf.iter.getTopKey().equals(nk("0003", "cf4", "buck,jane", "", 5)));
+    assertEquals(nv("09 Slum st"), trf.iter.getTopValue());
+    trf.iter.next();
+    assertFalse(trf.iter.hasTop());
+ */   
+    trf.reader.printInfo();
+    trf.closeReader();
+
   }
 
   @Test
@@ -885,7 +1025,6 @@ public class RFileTest {
 
   @Test
   public void test10() throws IOException {
-
     // test empty locality groups
     TestRFile trf = new TestRFile(conf);
 

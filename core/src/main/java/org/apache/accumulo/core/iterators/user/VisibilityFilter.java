@@ -20,8 +20,10 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.accumulo.core.client.IteratorSetting;
+import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
@@ -30,9 +32,11 @@ import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.security.ColumnVisibility;
 import org.apache.accumulo.core.security.VisibilityEvaluator;
+import org.apache.accumulo.core.security.VisibilityParseException;
 import org.apache.accumulo.core.util.BadArgumentException;
 import org.apache.commons.collections.map.LRUMap;
 import org.apache.hadoop.io.Text;
+import org.apache.log4j.Logger;
 
 /**
  * 
@@ -41,6 +45,8 @@ public class VisibilityFilter extends org.apache.accumulo.core.iterators.system.
   
   private static final String AUTHS = "auths";
   private static final String FILTER_INVALID_ONLY = "filterInvalid";
+  private static final Logger log = Logger.getLogger(VisibilityFilter.class);
+
   
   private boolean filterInvalid;
   
@@ -84,6 +90,35 @@ public class VisibilityFilter extends org.apache.accumulo.core.iterators.system.
       }
     } else {
       return super.accept(k, v);
+    }
+  }
+  
+  public boolean accept(Set<ByteSequence> visibilities){ 
+    if (filterInvalid) {
+      for (ByteSequence vis : visibilities) {
+        byte[] visibility = vis.toArray();
+
+        Boolean b = (Boolean) cache.get(vis);
+        if (b != null && b.booleanValue())
+          return b;
+        else {
+          try {
+            Boolean bb = ve.evaluate(new ColumnVisibility(visibility));
+            cache.put(new Text(visibility), bb);
+            if (bb)
+              return true;
+          } catch (VisibilityParseException e) {
+            log.error("Parse Error", e);
+            return false;
+          } catch (BadArgumentException e) {
+            log.error("Parse Error", e);
+            return false;
+          }
+        }
+      }
+      return false;
+    } else {
+      return super.accept(visibilities);
     }
   }
   
