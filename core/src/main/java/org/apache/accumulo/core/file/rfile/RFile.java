@@ -76,6 +76,7 @@ public class RFile {
   private RFile() {}
   
   private static final int RINDEX_MAGIC = 0x20637474;
+  static final int RINDEX_VER_8 = 8;
   static final int RINDEX_VER_7 = 7;
   static final int RINDEX_VER_6 = 6;
   // static final int RINDEX_VER_5 = 5; // unreleased
@@ -87,6 +88,7 @@ public class RFile {
     private int startBlock;
     private Key firstKey;
     private Map<ByteSequence,MutableLong> columnFamilies;
+    private Set<ByteSequence> visibilities;
     
     private boolean isDefaultLG = false;
     private String name;
@@ -97,6 +99,7 @@ public class RFile {
     
     public LocalityGroupMetadata(int version, BlockFileReader br) {
       columnFamilies = new HashMap<ByteSequence,MutableLong>();
+      visibilities = new HashSet<ByteSequence>();
       indexReader = new MultiLevelIndex.Reader(br, version);
     }
     
@@ -104,6 +107,7 @@ public class RFile {
       this.startBlock = nextBlock;
       isDefaultLG = true;
       columnFamilies = new HashMap<ByteSequence,MutableLong>();
+      visibilities = new HashSet<ByteSequence>();
       previousColumnFamilies = pcf;
       
       indexWriter = new MultiLevelIndex.BufferedWriter(new MultiLevelIndex.Writer(bfw, indexBlockSize));
@@ -118,6 +122,7 @@ public class RFile {
         columnFamilies.put(cf, new MutableLong(0));
       }
       
+      visibilities = new HashSet<ByteSequence>();
       indexWriter = new MultiLevelIndex.BufferedWriter(new MultiLevelIndex.Writer(bfw, indexBlockSize));
     }
     
@@ -171,7 +176,26 @@ public class RFile {
       count.increment();
       
     }
-    
+
+    public void updateVisibilities(Key key) {      
+      if(visibilities == null)
+      {
+        //Not keeping track anymore
+        return;
+      }
+      
+      if (visibilities.size() > Writer.MAX_VIS_IN_LG) {
+        // stop keeping track, there are too many
+        visibilities = null;
+        return;
+      }
+
+      ByteSequence visibility = key.getColumnVisibilityData();
+
+      if (!visibilities.contains(visibility))
+        visibilities.add(visibility);
+    }
+
     @Override
     public void readFields(DataInput in) throws IOException {
       
@@ -189,6 +213,7 @@ public class RFile {
           throw new IllegalStateException("Non default LG " + name + " does not have column families");
         
         columnFamilies = null;
+        visibilities = null;
       } else {
         if (columnFamilies == null)
           columnFamilies = new HashMap<ByteSequence,MutableLong>();
@@ -212,7 +237,6 @@ public class RFile {
         firstKey = null;
       }
       
-      indexReader.readFields(in);
     }
     
     @Override
@@ -242,7 +266,49 @@ public class RFile {
       if (firstKey != null)
         firstKey.write(out);
       
+    }
+
+    public void readVisibilities(DataInput in) throws IOException {
+      int size = in.readInt();
+
+      if (size != -1) {
+        if (visibilities == null)
+          visibilities = new HashSet<ByteSequence>();
+        else
+          visibilities.clear();
+
+        for (int i = 0; i < size; i++) {
+          int len = in.readInt();
+          byte cf[] = new byte[len];
+          in.readFully(cf);
+
+          visibilities.add(new ArrayByteSequence(cf));
+        }
+      }
+    }
+
+    public void writeVisibilities(DataOutput out) throws IOException {
+      if (isDefaultLG && columnFamilies == null) {
+        // only expect null when default LG, otherwise let a NPE occur
+        out.writeInt(-1);
+      } else {
+        if (visibilities == null)
+          visibilities = new HashSet<ByteSequence>();
+
+        out.writeInt(visibilities.size());
+        for (ByteSequence vis : visibilities) {
+          out.writeInt(vis.length());
+          out.write(vis.toArray());
+        }
+      }
+    }
+
+    public void close(DataOutput out) throws IOException {
       indexWriter.close(out);
+    }
+
+    public void readOtherFields(DataInput in) throws IOException {
+      indexReader.readFields(in);
     }
     
     public void printInfo() throws IOException {
@@ -274,6 +340,7 @@ public class RFile {
       
       out.println("\tNum entries          : " + String.format("%,d", numKeys));
       out.println("\tColumn families      : " + (isDefaultLG && columnFamilies == null ? "<UNKNOWN>" : columnFamilies.keySet()));
+      out.println("\tVisibilities         : " + (isDefaultLG && visibilities == null ? "<UNKNOWN>" : visibilities));
     }
     
   }
@@ -281,6 +348,7 @@ public class RFile {
   public static class Writer implements FileSKVWriter {
     
     public static final int MAX_CF_IN_DLG = 1000;
+    public static final int MAX_VIS_IN_LG = 100;
     
     private BlockFileWriter fileWriter;
     private ABlockWriter blockWriter;
@@ -327,7 +395,7 @@ public class RFile {
       ABlockWriter mba = fileWriter.prepareMetaBlock("RFile.index");
       
       mba.writeInt(RINDEX_MAGIC);
-      mba.writeInt(RINDEX_VER_7);
+      mba.writeInt(RINDEX_VER_8);
       
       if (currentLocalityGroup != null)
         localityGroups.add(currentLocalityGroup);
@@ -336,6 +404,8 @@ public class RFile {
       
       for (LocalityGroupMetadata lc : localityGroups) {
         lc.write(mba);
+        lc.writeVisibilities(mba);
+        lc.close(mba);
       }
       
       mba.close();
@@ -370,6 +440,7 @@ public class RFile {
       }
       
       currentLocalityGroup.updateColumnCount(key);
+      currentLocalityGroup.updateVisibilities(key);
       
       if (currentLocalityGroup.getFirstKey() == null) {
         currentLocalityGroup.setFirstKey(key);
@@ -478,7 +549,7 @@ public class RFile {
     private boolean checkRange = true;
     
     private LocalityGroupReader(BlockFileReader reader, LocalityGroupMetadata lgm, int version) throws IOException {
-      super(lgm.columnFamilies, lgm.isDefaultLG);
+      super(lgm.columnFamilies, lgm.visibilities, lgm.isDefaultLG);
       this.firstKey = lgm.firstKey;
       this.index = lgm.indexReader;
       this.startBlock = lgm.startBlock;
@@ -490,7 +561,7 @@ public class RFile {
     }
     
     public LocalityGroupReader(LocalityGroupReader lgr) {
-      super(lgr.columnFamilies, lgr.isDefaultLocalityGroup);
+      super(lgr.columnFamilies, lgr.visibilities, lgr.isDefaultLocalityGroup);
       this.firstKey = lgr.firstKey;
       this.index = lgr.index;
       this.startBlock = lgr.startBlock;
@@ -829,7 +900,7 @@ public class RFile {
 
         if (magic != RINDEX_MAGIC)
           throw new IOException("Did not see expected magic number, saw " + magic);
-        if (ver != RINDEX_VER_7 && ver != RINDEX_VER_6 && ver != RINDEX_VER_4 && ver != RINDEX_VER_3)
+        if (ver != RINDEX_VER_8 && ver != RINDEX_VER_7 && ver != RINDEX_VER_6 && ver != RINDEX_VER_4 && ver != RINDEX_VER_3)
           throw new IOException("Did not see expected version, saw " + ver);
 
         int size = mb.readInt();
@@ -840,11 +911,14 @@ public class RFile {
         for (int i = 0; i < size; i++) {
           LocalityGroupMetadata lgm = new LocalityGroupMetadata(ver, rdr);
           lgm.readFields(mb);
+         if(ver == RINDEX_VER_8)
+            lgm.readVisibilities(mb);
+          lgm.readOtherFields(mb);
           localityGroups.add(lgm);
 
           lgReaders[i] = new LocalityGroupReader(reader, lgm, ver);
         }
-      } finally {
+      }finally{
         mb.close();
       }
       
@@ -998,6 +1072,8 @@ public class RFile {
     public void printInfo() throws IOException {
       for (LocalityGroupMetadata lgm : localityGroups) {
         lgm.printInfo();
+        
+        
       }
       
     }

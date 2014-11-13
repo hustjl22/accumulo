@@ -25,13 +25,22 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import jline.internal.Log;
+
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
+import org.apache.accumulo.core.security.Authorizations;
+import org.apache.accumulo.core.security.ColumnVisibility;
+import org.apache.accumulo.core.security.VisibilityEvaluator;
+import org.apache.accumulo.core.security.VisibilityParseException;
+import org.apache.accumulo.core.util.BadArgumentException;
+import org.apache.commons.collections.map.LRUMap;
 import org.apache.commons.lang.mutable.MutableLong;
+import org.apache.hadoop.io.Text;
 
 /**
  * 
@@ -54,6 +63,13 @@ public class LocalityGroupIterator extends HeapIterator implements Interruptible
     public LocalityGroup(Map<ByteSequence,MutableLong> columnFamilies, boolean isDefaultLocalityGroup) {
       this.isDefaultLocalityGroup = isDefaultLocalityGroup;
       this.columnFamilies = columnFamilies;
+      this.visibilities = new HashSet<ByteSequence>();
+    }
+    
+    public LocalityGroup(Map<ByteSequence,MutableLong> columnFamilies, Set<ByteSequence> vis, boolean isDefaultLocalityGroup) {
+      this.isDefaultLocalityGroup = isDefaultLocalityGroup;
+      this.columnFamilies = columnFamilies;
+      this.visibilities = vis;
     }
 
     public InterruptibleIterator getIterator() {
@@ -62,6 +78,7 @@ public class LocalityGroupIterator extends HeapIterator implements Interruptible
 
     protected boolean isDefaultLocalityGroup;
     protected Map<ByteSequence,MutableLong> columnFamilies;
+    protected Set<ByteSequence> visibilities;
     private InterruptibleIterator iterator;
   }
   
@@ -79,6 +96,39 @@ public class LocalityGroupIterator extends HeapIterator implements Interruptible
   public void init(SortedKeyValueIterator<Key,Value> source, Map<String,String> options, IteratorEnvironment env) throws IOException {
     throw new UnsupportedOperationException();
   }
+  
+  public static boolean accept(Set<ByteSequence> visibilities, Authorizations authorizations){
+    VisibilityEvaluator ve = new VisibilityEvaluator(authorizations);
+    LRUMap cache = new LRUMap(1000);
+    
+    if (visibilities == null || visibilities.size() == 0)
+      return true;
+    
+    for(ByteSequence vis : visibilities){
+      byte[] visibility = vis.toArray();
+      
+      Boolean b = (Boolean) cache.get(vis);
+      if(b != null && b.booleanValue())
+        return b;
+      else{
+        try{
+          Boolean bb = ve.evaluate(new ColumnVisibility(visibility));
+          cache.put(new Text(visibility), bb);
+          if(bb)
+            return true;
+        }catch(VisibilityParseException e){
+          Log.error("Parse Error", e);
+          return false;
+        }catch (BadArgumentException e){
+          Log.error("Parse Error", e);
+          return false;
+        }
+      }
+    }
+    return false;
+   }
+  
+  private final static Authorizations authorizations = new Authorizations("L1");
   
   public static final int seek(HeapIterator hiter, LocalityGroup[] groups, Set<ByteSequence> nonDefaultColumnFamilies, Range range,
       Collection<ByteSequence> columnFamilies, boolean inclusive) throws IOException {
@@ -102,43 +152,46 @@ public class LocalityGroupIterator extends HeapIterator implements Interruptible
       // wanted column families
       boolean include = false;
       
-      if (cfSet.size() == 0) {
-        include = !inclusive;
-      } else if (lgr.isDefaultLocalityGroup && lgr.columnFamilies == null) {
-        // do not know what column families are in the default locality group,
-        // only know what column families are not in it
-        
-        if (inclusive) {
-          if (!nonDefaultColumnFamilies.containsAll(cfSet)) {
-            // default LG may contain wanted and unwanted column families
-            include = true;
-          }// else - everything wanted is in other locality groups, so nothing to do
-        } else {
-          // must include, if all excluded column families are in other locality groups
-          // then there are not unwanted column families in default LG
-          include = true;
-        }
-      } else {
-        /*
-         * Need to consider the following cases for inclusive and exclusive (lgcf:locality group column family set, cf:column family set) lgcf and cf are
-         * disjoint lgcf and cf are the same cf contains lgcf lgcf contains cf lgccf and cf intersect but neither is a subset of the other
-         */
-        
-        for (Entry<ByteSequence,MutableLong> entry : lgr.columnFamilies.entrySet())
-          if (entry.getValue().longValue() > 0)
-            if (cfSet.contains(entry.getKey())) {
-              if (inclusive)
-                include = true;
-            } else if (!inclusive) {
+      if(accept(lgr.visibilities, authorizations)){
+      
+        if (cfSet.size() == 0) {
+          include = !inclusive;
+        } else if (lgr.isDefaultLocalityGroup && lgr.columnFamilies == null) {
+          // do not know what column families are in the default locality group,
+          // only know what column families are not in it
+          
+          if (inclusive) {
+            if (!nonDefaultColumnFamilies.containsAll(cfSet)) {
+              // default LG may contain wanted and unwanted column families
               include = true;
-            }
+            }// else - everything wanted is in other locality groups, so nothing to do
+          } else {
+            // must include, if all excluded column families are in other locality groups
+            // then there are not unwanted column families in default LG
+            include = true;
+          }
+        } else {
+          /*
+           * Need to consider the following cases for inclusive and exclusive (lgcf:locality group column family set, cf:column family set) lgcf and cf are
+           * disjoint lgcf and cf are the same cf contains lgcf lgcf contains cf lgccf and cf intersect but neither is a subset of the other
+           */
+          
+          for (Entry<ByteSequence,MutableLong> entry : lgr.columnFamilies.entrySet())
+            if (entry.getValue().longValue() > 0)
+              if (cfSet.contains(entry.getKey())) {
+                if (inclusive)
+                  include = true;
+              } else if (!inclusive) {
+                include = true;
+              }
+        }
+  
+        if (include) {
+          lgr.getIterator().seek(range, EMPTY_CF_SET, false);
+          hiter.addSource(lgr.getIterator());
+          numLGSeeked++;
+        }// every column family is excluded, zero count, or not present
       }
-
-      if (include) {
-        lgr.getIterator().seek(range, EMPTY_CF_SET, false);
-        hiter.addSource(lgr.getIterator());
-        numLGSeeked++;
-      }// every column family is excluded, zero count, or not present
     }
     
     return numLGSeeked;
