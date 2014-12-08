@@ -64,8 +64,11 @@ import org.apache.accumulo.core.iterators.system.LocalityGroupIterator;
 import org.apache.accumulo.core.iterators.system.LocalityGroupIterator.LocalityGroup;
 import org.apache.accumulo.core.util.MutableByteSequence;
 import org.apache.commons.lang.mutable.MutableLong;
+import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.Writable;
 import org.apache.log4j.Logger;
+
+import com.google.common.util.concurrent.AtomicLongMap;
 
 public class RFile {
   
@@ -546,6 +549,8 @@ public class RFile {
         throw ioe;
       }
     }
+    private AtomicLongMap<String> visibilities = AtomicLongMap.create(new HashMap<String, Long>());
+    private ArrayList<String> inBlock = new ArrayList<String>();
     
     private void _next() throws IOException {
       
@@ -554,6 +559,7 @@ public class RFile {
       
       if (entriesLeft == 0) {
         currBlock.close();
+        inBlock.clear();
         
         if (iiter.hasNext()) {
           IndexEntry indexEntry = iiter.next();
@@ -575,6 +581,16 @@ public class RFile {
       prevKey = rk.getKey();
       rk.readFields(currBlock);
       val.readFields(currBlock);
+      
+      Text vis = rk.getKey().getColumnVisibility();
+      if (!inBlock.contains(vis.toString()) && visibilities.containsKey(vis.toString())) {
+        visibilities.incrementAndGet(vis.toString());
+        inBlock.add(vis.toString());
+      } else if (!inBlock.contains(vis.toString()) && !visibilities.containsKey(vis.toString())){
+        visibilities.put(vis.toString(), 1);
+        inBlock.add(vis.toString());
+      }
+      
       entriesLeft--;
       if (checkRange)
         hasTop = !range.afterEndKey(rk.getKey());
@@ -605,6 +621,7 @@ public class RFile {
       
       try {
         _seek(range);
+        
       } catch (IOException ioe) {
         reset();
         throw ioe;
@@ -641,7 +658,7 @@ public class RFile {
       Key startKey = range.getStartKey();
       if (startKey == null)
         startKey = new Key();
-      
+
       boolean reseek = true;
       
       if (range.afterEndKey(firstKey)) {
@@ -760,6 +777,15 @@ public class RFile {
       while (hasTop() && range.beforeStartKey(getTopKey())) {
         next();
       }
+
+      visibilities.clear();
+      inBlock.clear();
+      if (rk != null) {
+        Text vis = rk.getKey().getColumnVisibility();
+        visibilities.put(vis.toString(), 1);
+        inBlock.add(vis.toString());
+      }
+
     }
     
     @Override
@@ -973,7 +999,33 @@ public class RFile {
       
     }
     
+    public ArrayList<ArrayList<ByteSequence>> getLocalityGroupCF() {
+      ArrayList<ArrayList<ByteSequence>> cf = new ArrayList<ArrayList<ByteSequence>>();
+
+      for (LocalityGroupMetadata lcg : localityGroups) {
+        ArrayList<ByteSequence> setCF = new ArrayList<ByteSequence>();
+
+        for (Entry<ByteSequence,MutableLong> entry : lcg.columnFamilies.entrySet()) {
+          setCF.add(entry.getKey());
+        }
+
+        cf.add(setCF);
+      }
+
+      return cf;
+    }
+    
     private int numLGSeeked = 0;
+
+    public Map<String, Long> getVisibilities(int lGroup)
+    {
+      return lgReaders[lGroup].visibilities.asMap();
+    }
+    
+    public int getNumBlocks(int lGroup)
+    {
+      return lgReaders[lGroup].blockCount;
+    }
     
     @Override
     public void seek(Range range, Collection<ByteSequence> columnFamilies, boolean inclusive) throws IOException {
