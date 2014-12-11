@@ -43,6 +43,10 @@ public class PrintInfo {
   static class Opts extends Help {
     @Parameter(names = {"-d", "--dump"}, description = "dump the key/value pairs")
     boolean dump = false;
+    @Parameter(names = {"-v", "--vis"}, description = "show visibility metrics")
+    boolean vis = false;
+    @Parameter(names = {"--hash"}, description = "show visibilities as hashes")
+    boolean hash = false;
     @Parameter(names = {"--histogram"}, description = "print a histogram of the key-value sizes")
     boolean histogram = false;
     @Parameter(description = " <file> { <file> ... }")
@@ -84,6 +88,11 @@ public class PrintInfo {
       
       CachableBlockFile.Reader _rdr = new CachableBlockFile.Reader(fs, path, conf, null, null, aconf);
       Reader iter = new RFile.Reader(_rdr);
+      
+      if(opts.vis)
+        iter.printVis();
+      if(opts.hash)
+        iter.printVisHash();
       
       iter.printInfo();
       System.out.println();

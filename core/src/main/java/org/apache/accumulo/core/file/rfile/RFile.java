@@ -68,6 +68,10 @@ import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.Writable;
 import org.apache.log4j.Logger;
 
+import com.google.common.base.Charsets;
+import com.google.common.hash.HashCode;
+import com.google.common.hash.HashFunction;
+import com.google.common.hash.Hashing;
 import com.google.common.util.concurrent.AtomicLongMap;
 
 public class RFile {
@@ -549,8 +553,8 @@ public class RFile {
         throw ioe;
       }
     }
-    private AtomicLongMap<String> visibilities = AtomicLongMap.create(new HashMap<String, Long>());
-    private ArrayList<String> inBlock = new ArrayList<String>();
+    private AtomicLongMap<String> visibilities;
+    private ArrayList<String> inBlock;
     
     private void _next() throws IOException {
       
@@ -559,7 +563,8 @@ public class RFile {
       
       if (entriesLeft == 0) {
         currBlock.close();
-        inBlock.clear();
+        if(visMetrics)
+          inBlock.clear();
         
         if (iiter.hasNext()) {
           IndexEntry indexEntry = iiter.next();
@@ -582,13 +587,15 @@ public class RFile {
       rk.readFields(currBlock);
       val.readFields(currBlock);
       
-      Text vis = rk.getKey().getColumnVisibility();
-      if (!inBlock.contains(vis.toString()) && visibilities.containsKey(vis.toString())) {
-        visibilities.incrementAndGet(vis.toString());
-        inBlock.add(vis.toString());
-      } else if (!inBlock.contains(vis.toString()) && !visibilities.containsKey(vis.toString())){
-        visibilities.put(vis.toString(), 1);
-        inBlock.add(vis.toString());
+      if (visMetrics) {
+        Text vis = rk.getKey().getColumnVisibility();
+        if (!inBlock.contains(vis.toString()) && visibilities.containsKey(vis.toString())) {
+          visibilities.incrementAndGet(vis.toString());
+          inBlock.add(vis.toString());
+        } else if (!inBlock.contains(vis.toString()) && !visibilities.containsKey(vis.toString())) {
+          visibilities.put(vis.toString(), 1);
+          inBlock.add(vis.toString());
+        }
       }
       
       entriesLeft--;
@@ -778,14 +785,16 @@ public class RFile {
         next();
       }
 
-      visibilities.clear();
-      inBlock.clear();
-      if (rk != null) {
-        Text vis = rk.getKey().getColumnVisibility();
-        visibilities.put(vis.toString(), 1);
-        inBlock.add(vis.toString());
+      if (visMetrics) {
+        visibilities.clear();
+        inBlock.clear();
+        if (rk != null) {
+          Text vis = rk.getKey().getColumnVisibility();
+          visibilities.put(vis.toString(), 1);
+          inBlock.add(vis.toString());
+        }
       }
-
+      
     }
     
     @Override
@@ -828,6 +837,13 @@ public class RFile {
     @Override
     public InterruptibleIterator getIterator() {
       return this;
+    }
+
+    private boolean visMetrics = false;
+    public void printVis() {
+      visMetrics = true;
+      visibilities = AtomicLongMap.create(new HashMap<String, Long>());
+      inBlock = new ArrayList<String>();
     }
   }
   
@@ -1016,6 +1032,22 @@ public class RFile {
     }
     
     private int numLGSeeked = 0;
+    private boolean visMetrics = false;
+    private boolean hash = false;
+    
+    public void printVis()
+    {
+      visMetrics = true;
+      for(LocalityGroupReader lgr : lgReaders)
+      {
+        lgr.printVis();
+      }
+    }
+    
+    public void printVisHash()
+    {
+      hash = true;
+    }
 
     public Map<String, Long> getVisibilities(int lGroup)
     {
@@ -1046,12 +1078,67 @@ public class RFile {
       
       return new MultiIndexIterator(this, indexes);
     }
-    
-    public void printInfo() throws IOException {
+
+    public void printInfo(boolean hash) throws IOException {
+      int localityGroup = 0;
+      ArrayList<ArrayList<ByteSequence>> cf = getLocalityGroupCF();
       for (LocalityGroupMetadata lgm : localityGroups) {
         lgm.printInfo();
+
+        AtomicLongMap<String> visibilities = AtomicLongMap.create(new HashMap<String, Long>());
+        this.seek(new Range((Key) null, (Key) null), cf.get(localityGroup), true);
+        long numKeys = 0;
+        while (this.hasTop()) {
+          Key key = this.getTopKey();
+          Text vis = key.getColumnVisibility();
+          if (visibilities.containsKey(vis.toString())) {
+            visibilities.getAndIncrement(vis.toString());
+          } else
+            visibilities.put(vis.toString(), 1);
+
+          this.next();
+          numKeys++;
+        }
+
+        Map<String,Long> blockData = this.getVisibilities(localityGroup);
+        int numBlocks = this.getNumBlocks(localityGroup);
+        System.out.println();
+        // System.out.println("Locality Group with column families: " + cf);
+        System.out.println("\tVisibility " + "\t" + "Number of keys" + "\t   " + "Percent of keys" + "\t" + "Number of blocks" + "\t" + "Percent of blocks");
+        for (Entry<String,Long> entry : visibilities.asMap().entrySet()) {
+          HashFunction hf = Hashing.md5();
+          HashCode hc = hf.newHasher().putString(entry.getKey(), Charsets.UTF_8).hash();
+          if (hash)
+            System.out.print("\t" + hc.toString().substring(0, 8) + "\t\t" + entry.getValue() + "\t\t");
+          else
+            System.out.print("\t" + entry.getKey() + "\t\t" + entry.getValue() + "\t\t");
+          System.out.printf("%.2f", ((double) entry.getValue() / numKeys) * 100);
+          System.out.print("%\t\t\t");
+
+          long blocksIn = blockData.get(entry.getKey());
+
+          System.out.print(blocksIn + "\t\t   ");
+          System.out.printf("%.2f", ((double) blocksIn / numBlocks) * 100);
+          System.out.print("%");
+
+          System.out.println("");
+        }
+        // System.out.println("Number of keys: " + numKeys);
+        System.out.println();
+
+        localityGroup++;
       }
-      
+    }
+
+    public void printInfo() throws IOException {
+      if(!visMetrics)
+      {
+        for (LocalityGroupMetadata lgm : localityGroups) {
+          lgm.printInfo();
+        }
+      } 
+      else
+        printInfo(hash);
     }
     
     @Override
