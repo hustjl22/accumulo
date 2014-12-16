@@ -39,42 +39,42 @@ import com.beust.jcommander.Parameter;
 
 public class PrintInfo {
   private static final Logger log = Logger.getLogger(PrintInfo.class);
-  
+
   static class Opts extends Help {
     @Parameter(names = {"-d", "--dump"}, description = "dump the key/value pairs")
     boolean dump = false;
     @Parameter(names = {"-v", "--vis"}, description = "show visibility metrics")
     boolean vis = false;
-    @Parameter(names = {"--hash"}, description = "show visibilities as hashes")
+    @Parameter(names = {"--visHash"}, description = "show visibilities as hashes")
     boolean hash = false;
     @Parameter(names = {"--histogram"}, description = "print a histogram of the key-value sizes")
     boolean histogram = false;
     @Parameter(description = " <file> { <file> ... }")
     List<String> files = new ArrayList<String>();
   }
-  
+
   public static void main(String[] args) throws Exception {
     Configuration conf = new Configuration();
 
     AccumuloConfiguration aconf = SiteConfiguration.getInstance(DefaultConfiguration.getInstance());
     // TODO ACCUMULO-2462 This will only work for RFiles (path only, not URI) in HDFS when the correct filesystem for the given file
-    // is on Property.INSTANCE_DFS_DIR or, when INSTANCE_DFS_DIR is not defined, is on the default filesystem 
+    // is on Property.INSTANCE_DFS_DIR or, when INSTANCE_DFS_DIR is not defined, is on the default filesystem
     // defined in the Hadoop's core-site.xml
     //
     // A workaround is to always provide a URI to this class
     FileSystem hadoopFs = VolumeConfiguration.getDefaultVolume(conf, aconf).getFileSystem();
-    FileSystem localFs  = FileSystem.getLocal(conf);
+    FileSystem localFs = FileSystem.getLocal(conf);
     Opts opts = new Opts();
     opts.parseArgs(PrintInfo.class.getName(), args);
     if (opts.files.isEmpty()) {
       System.err.println("No files were given");
       System.exit(-1);
     }
-    
+
     long countBuckets[] = new long[11];
     long sizeBuckets[] = new long[countBuckets.length];
     long totalSize = 0;
-    
+
     for (String arg : opts.files) {
       Path path = new Path(arg);
       FileSystem fs;
@@ -85,44 +85,56 @@ public class PrintInfo {
         log.warn("Attempting to find file across filesystems. Consider providing URI instead of path");
         fs = hadoopFs.exists(path) ? hadoopFs : localFs; // fall back to local
       }
-      
+
       CachableBlockFile.Reader _rdr = new CachableBlockFile.Reader(fs, path, conf, null, null, aconf);
       Reader iter = new RFile.Reader(_rdr);
-      
-      if(opts.vis)
-        iter.printVis();
-      if(opts.hash)
-        iter.printVisHash();
-      
+      VisMetricsGatherer vmg = new VisMetricsGatherer(iter);
+
+      if (opts.vis || opts.hash)
+        iter.printVis(vmg);
+
       iter.printInfo();
       System.out.println();
       org.apache.accumulo.core.file.rfile.bcfile.PrintInfo.main(new String[] {arg});
-      
-      if (opts.histogram || opts.dump) {
-        iter.seek(new Range((Key) null, (Key) null), new ArrayList<ByteSequence>(), false);
-        while (iter.hasTop()) {
-          Key key = iter.getTopKey();
-          Value value = iter.getTopValue();
-          if (opts.dump)
-            System.out.println(key + " -> " + value);
-          if (opts.histogram) {
-            long size = key.getSize() + value.getSize();
-            int bucket = (int) Math.log10(size);
-            countBuckets[bucket]++;
-            sizeBuckets[bucket] += size;
-            totalSize += size;
+
+      ArrayList<ArrayList<ByteSequence>> localityGroupCF = null;
+
+      if (opts.histogram || opts.dump || opts.vis || opts.hash) {
+        localityGroupCF = iter.getLocalityGroupCF();
+
+        for (ArrayList<ByteSequence> cf : localityGroupCF) {
+
+          iter.seek(new Range((Key) null, (Key) null), cf, true);
+          while (iter.hasTop()) {
+            Key key = iter.getTopKey();
+            Value value = iter.getTopValue();
+            if (opts.dump)
+              System.out.println(key + " -> " + value);
+            if (opts.histogram) {
+              long size = key.getSize() + value.getSize();
+              int bucket = (int) Math.log10(size);
+              countBuckets[bucket]++;
+              sizeBuckets[bucket] += size;
+              totalSize += size;
+            }
+            iter.next();
           }
-          iter.next();
         }
       }
+      System.out.println();
+
       iter.close();
+
+      if (opts.vis || opts.hash)
+        vmg.printMetrics(opts.hash);
+
       if (opts.histogram) {
         System.out.println("Up to size      count      %-age");
         for (int i = 1; i < countBuckets.length; i++) {
           System.out.println(String.format("%11.0f : %10d %6.2f%%", Math.pow(10, i), countBuckets[i], sizeBuckets[i] * 100. / totalSize));
         }
       }
-      
+
       // If the output stream has closed, there is no reason to keep going.
       if (System.out.checkError())
         return;
