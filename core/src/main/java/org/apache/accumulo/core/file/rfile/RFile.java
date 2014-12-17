@@ -554,6 +554,8 @@ public class RFile {
       
       if (entriesLeft == 0) {
         currBlock.close();
+        if(visMetrics)
+          visibilityMetrics.newBlock();
         
         if (iiter.hasNext()) {
           IndexEntry indexEntry = iiter.next();
@@ -575,6 +577,10 @@ public class RFile {
       prevKey = rk.getKey();
       rk.readFields(currBlock);
       val.readFields(currBlock);
+      
+      if(visMetrics)
+        visibilityMetrics.addMetric(rk.getKey().getColumnVisibility().toString());
+      
       entriesLeft--;
       if (checkRange)
         hasTop = !range.afterEndKey(rk.getKey());
@@ -641,7 +647,7 @@ public class RFile {
       Key startKey = range.getStartKey();
       if (startKey == null)
         startKey = new Key();
-      
+
       boolean reseek = true;
       
       if (range.afterEndKey(firstKey)) {
@@ -760,6 +766,11 @@ public class RFile {
       while (hasTop() && range.beforeStartKey(getTopKey())) {
         next();
       }
+      
+      if(visMetrics){
+        visibilityMetrics.newLocalityGroup();
+        visibilityMetrics.addMetric(rk.getKey().getColumnVisibility().toString());
+      }
     }
     
     @Override
@@ -802,6 +813,13 @@ public class RFile {
     @Override
     public InterruptibleIterator getIterator() {
       return this;
+    }
+
+    private boolean visMetrics = false;
+    private MetricsGatherer visibilityMetrics;
+    public void printVis(MetricsGatherer vmg) {
+      visMetrics = true;
+      visibilityMetrics = vmg;
     }
   }
   
@@ -973,7 +991,31 @@ public class RFile {
       
     }
     
+    public ArrayList<ArrayList<ByteSequence>> getLocalityGroupCF() {
+      ArrayList<ArrayList<ByteSequence>> cf = new ArrayList<ArrayList<ByteSequence>>();
+
+      for (LocalityGroupMetadata lcg : localityGroups) {
+        ArrayList<ByteSequence> setCF = new ArrayList<ByteSequence>();
+
+        for (Entry<ByteSequence,MutableLong> entry : lcg.columnFamilies.entrySet()) {
+          setCF.add(entry.getKey());
+        }
+
+        cf.add(setCF);
+      }
+
+      return cf;
+    }
+    
     private int numLGSeeked = 0;
+    
+    public void printVis(MetricsGatherer vmg)
+    {
+      for(LocalityGroupReader lgr : lgReaders)
+      {
+        lgr.printVis(vmg);
+      }
+    }
     
     @Override
     public void seek(Range range, Collection<ByteSequence> columnFamilies, boolean inclusive) throws IOException {
@@ -994,12 +1036,11 @@ public class RFile {
       
       return new MultiIndexIterator(this, indexes);
     }
-    
+
     public void printInfo() throws IOException {
       for (LocalityGroupMetadata lgm : localityGroups) {
         lgm.printInfo();
       }
-      
     }
     
     @Override
